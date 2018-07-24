@@ -35,9 +35,14 @@ VkResult VulkanExampleBase::createInstance(bool enableValidation)
 #elif defined(_DIRECT2DISPLAY)
 	instanceExtensions.push_back(VK_KHR_DISPLAY_EXTENSION_NAME);
 #elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
+	printf("### UseWayland \n");
 	instanceExtensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
+	printf("### UseXCB \n");
 	instanceExtensions.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+	printf("### UseXLIB \n");
+	instanceExtensions.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
 #elif defined(VK_USE_PLATFORM_IOS_MVK)
 	instanceExtensions.push_back(VK_MVK_IOS_SURFACE_EXTENSION_NAME);
 #elif defined(VK_USE_PLATFORM_MACOS_MVK)
@@ -551,6 +556,57 @@ void VulkanExampleBase::renderLoop()
 				xcb_change_property(connection, XCB_PROP_MODE_REPLACE,
 					window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
 					windowTitle.size(), windowTitle.c_str());
+			}
+			lastFPS = (float)frameCounter * (1000.0f / fpsTimer);
+			fpsTimer = 0.0f;
+			frameCounter = 0;
+		}
+		updateOverlay();
+	}
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+	while (!quit)
+	{
+		auto tStart = std::chrono::high_resolution_clock::now();
+		if (viewUpdated)
+		{
+			viewUpdated = false;
+			viewChanged();
+		}
+
+		XEvent event;
+		while (XPending(display) > 0) {
+			XNextEvent(display, &event);
+			handleEvent(&event);
+		}
+	
+		render();
+		frameCounter++;
+		auto tEnd = std::chrono::high_resolution_clock::now();
+		auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+		frameTimer = tDiff / 1000.0f;
+		camera.update(frameTimer);
+		if (camera.moving())
+		{
+			viewUpdated = true;
+		}
+		// Convert to clamped timer value
+		if (!paused)
+		{
+			timer += timerSpeed * frameTimer;
+			if (timer > 1.0)
+			{
+				timer -= 1.0f;
+			}
+		}
+		fpsTimer += (float)tDiff;
+		if (fpsTimer > 1000.0f)
+		{
+			if (!settings.overlay)
+			{
+				//std::string windowTitle = getWindowTitle();
+				// xcb_change_property(connection, XCB_PROP_MODE_REPLACE,
+				// 	window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
+				// 	windowTitle.size(), windowTitle.c_str());
 			}
 			lastFPS = (float)frameCounter * (1000.0f / fpsTimer);
 			fpsTimer = 0.0f;
@@ -1961,6 +2017,153 @@ void VulkanExampleBase::handleEvent(const xcb_generic_event_t *event)
 		break;
 	}
 }
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+
+// Set up a window using Xlib and request event types
+Window VulkanExampleBase::setupWindow()
+{
+	XInitThreads();
+	display = XOpenDisplay(nullptr);
+	long visualMask = VisualScreenMask;
+	int numberOfVisuals;
+	XVisualInfo vInfoTemplate = {};
+	vInfoTemplate.screen = DefaultScreen(display);
+	XVisualInfo *visualInfo = XGetVisualInfo(display, visualMask, &vInfoTemplate, &numberOfVisuals);
+
+	Colormap colormap = XCreateColormap(display, RootWindow(display, vInfoTemplate.screen), visualInfo->visual, AllocNone);
+
+	XSetWindowAttributes windowAttributes = {};
+	windowAttributes.colormap = colormap;
+	windowAttributes.background_pixel = 0xFFFFFFFF;
+	windowAttributes.border_pixel = 0;
+	windowAttributes.event_mask = KeyPressMask | KeyReleaseMask | StructureNotifyMask | ExposureMask;
+
+	window = XCreateWindow(display, RootWindow(display, vInfoTemplate.screen), 0, 0, width, height, 0, visualInfo->depth,
+								InputOutput, visualInfo->visual, CWBackPixel | CWBorderPixel | CWEventMask | CWColormap,
+								&windowAttributes);
+
+	XSelectInput(display, window,
+	 KeyReleaseMask |
+	 KeyPressMask |
+	 ExposureMask |
+	 StructureNotifyMask |
+	 ButtonMotionMask |
+	 ButtonPressMask |
+	 ButtonReleaseMask);
+	XMapWindow(display, window);
+	XFlush(display);
+
+	xlib_wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(display, window, &xlib_wm_delete_window, 1);
+
+	return(window);
+}
+
+void VulkanExampleBase::handleEvent(const XEvent *event)
+{
+	switch (event->type)
+	{
+	case ClientMessage:
+		if ((Atom)event->xclient.data.l[0] == xlib_wm_delete_window) {
+			quit = true;
+		}
+	 	break;
+	case MotionNotify:
+	{
+		handleMouseMove(event->xmotion.x, event->xmotion.y);
+		break;
+	}
+	break;
+	case ButtonPress:
+	{
+		auto button = event->xbutton.button;
+		if (button == Button1)
+			mouseButtons.left = true;
+		if (button == Button2)
+			mouseButtons.middle = true;
+		if (button == Button3)
+			mouseButtons.right = true;
+	}
+	break;
+	case ButtonRelease:
+	{
+		auto button = event->xbutton.button;
+		if (button == Button1)
+			mouseButtons.left = false;
+		if (button == Button2)
+			mouseButtons.middle = false;			
+		if (button == Button3)
+			mouseButtons.right = false;
+	}
+	break;
+	case KeyPress:
+	{
+		auto keycode = event->xkey.keycode;
+		switch (keycode)
+		{
+			case KEY_W:
+				camera.keys.up = true;
+				break;
+			case KEY_S:
+				camera.keys.down = true;
+				break;
+			case KEY_A:
+				camera.keys.left = true;
+				break;
+			case KEY_D:
+				camera.keys.right = true;
+				break;
+			case KEY_P:
+				paused = !paused;
+				break;
+			case KEY_F1:
+				if (settings.overlay) {
+					settings.overlay = !settings.overlay;
+				}
+				break;				
+		}
+	}
+	break;	
+	case KeyRelease:
+	{
+		auto keycode = event->xkey.keycode;
+		switch (keycode)
+		{
+			case KEY_W:
+				camera.keys.up = false;
+				break;
+			case KEY_S:
+				camera.keys.down = false;
+				break;
+			case KEY_A:
+				camera.keys.left = false;
+				break;
+			case KEY_D:
+				camera.keys.right = false;
+				break;			
+			case KEY_ESCAPE:
+				quit = true;
+				break;
+		}
+		keyPressed(keycode);
+	}
+	break;
+	case DestroyNotify:
+		quit = true;
+		break;
+	case ConfigureNotify:
+	{
+		if (((int32_t)width != event->xconfigure.width) || ((int32_t)height != event->xconfigure.height)) {
+			width = event->xconfigure.width;
+			height = event->xconfigure.height;
+			windowResize();
+		}
+	}
+	break;
+	default:
+		break;
+	}
+}
 #endif
 
 void VulkanExampleBase::viewChanged() {}
@@ -2245,6 +2448,8 @@ void VulkanExampleBase::initSwapchain()
 	swapChain.initSurface(display, surface);
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
 	swapChain.initSurface(connection, window);
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+	swapChain.initSurface(display, window);
 #endif
 }
 

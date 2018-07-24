@@ -26,6 +26,8 @@
 //
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
 #include <xcb/xcb.h>
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+#include <X11/Xutil.h>
 #endif
 
 #include <iostream>
@@ -244,6 +246,11 @@ public:
 	xcb_screen_t *screen;
 	xcb_window_t window;
 	xcb_intern_atom_reply_t *atom_wm_delete_window;
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+	bool quit = false;
+	Display* display;
+	Window window;
+	Atom xlib_wm_delete_window;
 #endif
 
 	// Default ctor
@@ -313,6 +320,9 @@ public:
 	xcb_window_t setupWindow();
 	void initxcbConnection();
 	void handleEvent(const xcb_generic_event_t *event);
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+	Window setupWindow();
+	void handleEvent(const XEvent *event);
 #endif
 	/**
 	* Create the application wide Vulkan instance
@@ -480,6 +490,27 @@ int main(const int argc, const char *argv[])													    \
 #define VULKAN_EXAMPLE_MAIN()																		\
 VulkanExample *vulkanExample;																		\
 static void handleEvent(const xcb_generic_event_t *event)											\
+{																									\
+	if (vulkanExample != NULL)																		\
+	{																								\
+		vulkanExample->handleEvent(event);															\
+	}																								\
+}																									\
+int main(const int argc, const char *argv[])													    \
+{																									\
+	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };  				\
+	vulkanExample = new VulkanExample();															\
+	vulkanExample->initVulkan();																	\
+	vulkanExample->setupWindow();					 												\
+	vulkanExample->prepare();																		\
+	vulkanExample->renderLoop();																	\
+	delete(vulkanExample);																			\
+	return 0;																						\
+}
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+#define VULKAN_EXAMPLE_MAIN()																		\
+VulkanExample *vulkanExample;																		\
+static void handleEvent(const XEvent *event)				             							\
 {																									\
 	if (vulkanExample != NULL)																		\
 	{																								\
